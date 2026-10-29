@@ -1,0 +1,16 @@
+[
+  {
+    "name": "Visual regression: pixels differ from the golden",
+    "matchedStatuses": ["failed"],
+    "messageRegex": "(?s).*Images differ.*"
+  },
+  {
+    "name": "Visual regression: component size changed",
+    "matchedStatuses": ["failed"],
+    "messageRegex": "(?s).*(Widths|Heights) differ too much.*"
+  },
+  {
+    "name": "Rendering or test setup error",
+    "matchedStatuses": ["broken"]
+  }
+]

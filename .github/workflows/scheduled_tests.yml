@@ -1,0 +1,222 @@
+name: Screenshot tests
+
+on:
+  schedule:
+    # Every day at 02:00 UTC
+    - cron: '0 2 * * *'
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      record:
+        description: 'Record new goldens instead of verifying (upload them as an artifact for review)'
+        type: boolean
+        default: false
+      check_determinism:
+        description: 'Record the goldens on two fresh runners and check that both runs produce byte-identical images'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Spotless (ktlint + license headers)
+    if: ${{ !inputs.record && !inputs.check_determinism }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v5
+      - run: ./gradlew spotlessCheck
+
+  verify:
+    name: Verify screenshots against goldens
+    if: ${{ !inputs.record && !inputs.check_determinism }}
+    runs-on: ubuntu-latest
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+
+      # Paparazzi 2.x needs Java 21 to run the build.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v5
+
+      # verifyPaparazziDebug runs the unit test task itself, in verify mode. Running
+      # testDebugUnitTest as well would render every snapshot a second time.
+      - name: Verify screenshots
+        run: ./gradlew :app:verifyPaparazziDebug
+
+      - name: Describe the environment for Allure
+        if: always()
+        run: |
+          mkdir -p app/build/allure-results
+          cat > app/build/allure-results/environment.properties <<EOF
+          Runner=GitHub Actions (${RUNNER_OS}, ${ImageOS:-unknown image})
+          Java=$(java -version 2>&1 | head -n 1)
+          Commit=${GITHUB_SHA}
+          Branch=${GITHUB_REF_NAME}
+          EOF
+
+      - name: Build Allure report
+        if: always()
+        run: ./gradlew :app:allureReport
+
+      - name: List failed snapshots in the job summary
+        if: failure()
+        run: |
+          {
+            echo "### Snapshots that differ from their golden"
+            echo
+            echo "Download the **paparazzi-failures** artifact to see each delta image (golden | diff | actual)."
+            echo
+            find app/build/paparazzi/failures -name 'delta-*.png' -printf '- `%f`\n' 2>/dev/null || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Paparazzi failures (delta and actual images)
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: paparazzi-failures
+          path: app/build/paparazzi/failures/
+          retention-days: 14
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: test-reports
+          path: |
+            app/build/reports/tests/
+            app/build/reports/paparazzi/
+            app/build/reports/allure-report/
+            app/build/allure-results/
+          retention-days: 14
+
+      # Optional. Runs only when both secrets exist, so forks and repos without a bot
+      # are not affected. Sends a message only when the nightly or main-branch run fails.
+      - name: Notify Telegram about the failure
+        if: ${{ failure() && env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != '' && github.event_name != 'pull_request' }}
+        run: |
+          TEXT="❌ <b>Screenshot tests failed</b>"$'\n\n'
+          TEXT+="<b>Repository:</b> ${GITHUB_REPOSITORY}"$'\n'
+          TEXT+="<b>Branch:</b> ${GITHUB_REF_NAME}"$'\n'
+          TEXT+="<b>Trigger:</b> ${GITHUB_EVENT_NAME}"$'\n'
+          TEXT+="<a href='${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}'>Open the run</a>"
+          curl --fail --silent --show-error -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d "chat_id=${TELEGRAM_CHAT_ID}" \
+            -d "parse_mode=HTML" \
+            --data-urlencode "text=${TEXT}"
+
+  # Run manually with "record" checked. Goldens are recorded on the same Linux runner that
+  # verifies them, so font rendering matches. They are never committed to the tested branch
+  # automatically: they go to a separate goldens/review-<run id> branch and to an artifact.
+  # Review every image, then bring the correct ones into the branch under test.
+  record:
+    name: Record goldens for review
+    if: ${{ inputs.record }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Record goldens
+        run: ./gradlew :app:recordPaparazziDebug
+      - name: Upload recorded goldens
+        uses: actions/upload-artifact@v6
+        with:
+          name: recorded-goldens
+          path: app/src/test/snapshots/images/
+          retention-days: 14
+      - name: Push recorded goldens to a review branch
+        run: |
+          BRANCH="goldens/review-${GITHUB_RUN_ID}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add app/src/test/snapshots/images/
+          git commit -m "Goldens recorded by run ${GITHUB_RUN_ID} on ${GITHUB_REF_NAME} (not reviewed yet)"
+          git push origin "$BRANCH"
+          echo "Recorded goldens pushed to \`$BRANCH\` for review." >> "$GITHUB_STEP_SUMMARY"
+
+  # Run manually with "check_determinism" checked. Evidence for the claim that the same code
+  # renders the same pixels: two fresh runners record all goldens, and the job fails unless
+  # both produce byte-identical files. The comparison with the committed goldens is reported
+  # too, but does not fail the job, because a branch may contain tests without goldens yet.
+  determinism-record:
+    name: Record goldens for the determinism check (run ${{ matrix.run }})
+    if: ${{ inputs.check_determinism }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        run: [ 1, 2 ]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Hash the committed goldens
+        run: (cd app/src/test/snapshots/images && sha256sum *.png) > committed.sha256
+      - name: Record goldens
+        run: ./gradlew :app:recordPaparazziDebug --no-build-cache
+      - name: Hash the recorded goldens
+        run: (cd app/src/test/snapshots/images && sha256sum *.png) > "recorded-${{ matrix.run }}.sha256"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: goldens-sha256-${{ matrix.run }}
+          path: |
+            committed.sha256
+            recorded-${{ matrix.run }}.sha256
+          retention-days: 90
+
+  determinism-compare:
+    name: Compare the two recordings
+    needs: determinism-record
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: goldens-sha256-*
+          merge-multiple: true
+      - name: Compare checksums
+        run: |
+          {
+            echo "### Determinism check"
+            echo
+            echo "Commit: \`${GITHUB_SHA}\`, $(wc -l < recorded-1.sha256) images per run."
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if diff recorded-1.sha256 committed.sha256 > committed.diff; then
+            echo "- Recorded images are byte-identical to the committed goldens." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Recorded images differ from the committed goldens (expected for new or changed tests):" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"; cat committed.diff >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if diff recorded-1.sha256 recorded-2.sha256 > runs.diff; then
+            echo "- **Run 1 and run 2 are byte-identical.**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- **Run 1 and run 2 differ. Rendering is not deterministic:**" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"; cat runs.diff >> "$GITHUB_STEP_SUMMARY"; echo '```' >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
