@@ -114,8 +114,13 @@ jobs on a macOS runner.
 
 How to check it: the manual **determinism** run of the CI workflow (`check_determinism`) records
 all goldens on two fresh runners and fails unless both runs produce byte-identical images. Run it
-after every toolchain or runner-image change. Link the latest run here when you quote the result:
-_no run linked yet_.
+after every toolchain or runner-image change.
+
+Evidence so far: the two record runs
+[40963924792](https://github.com/ilonazakharova/jetnews-visualregression/actions/runs/40963924792) and
+[40965498511](https://github.com/ilonazakharova/jetnews-visualregression/actions/runs/40965498511) ran
+on separate runners and produced byte-identical files for all 31 goldens they share; the 24 goldens
+that existed before were also byte-identical to the committed ones.
 
 ## 6. Scaling
 
