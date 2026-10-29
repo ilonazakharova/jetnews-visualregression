@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.ComposeView
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import com.android.ide.common.rendering.api.SessionParams.RenderingMode
@@ -95,19 +94,3 @@ fun PopularCardInRow(post: Post) {
         PostCardPopular(post = post, navigateToPost = {})
     }
 }
-
-/**
- * Takes the snapshot [offsetMillis] after the first frame instead of at the first frame.
- *
- * Some states only appear through an animation that starts when the screen is shown: the
- * pull-to-refresh indicator slides in, and a snackbar fades and scales in. At the first frame
- * they are still invisible. Paparazzi's clock is fixed, so a snapshot at the same offset is
- * always the same frame.
- */
-fun Paparazzi.snapshotAfter(offsetMillis: Long, content: @Composable () -> Unit) {
-    val view = ComposeView(context).apply { setContent(content) }
-    snapshot(view = view, offsetMillis = offsetMillis)
-}
-
-/** Long enough for the refresh indicator and the snackbar to finish their enter animations. */
-const val ENTER_ANIMATIONS_DONE_MILLIS = 1_000L

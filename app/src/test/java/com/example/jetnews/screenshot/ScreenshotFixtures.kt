@@ -101,9 +101,6 @@ object ScreenshotFixtures {
     /** Pull to refresh in progress: the old posts stay visible under the refresh indicator. */
     val homeRefreshing: HomeUiState = homeWithPosts.copy(isLoading = true)
 
-    /** A refresh failed while posts were shown: the posts stay and a snackbar offers a retry. */
-    val homeRefreshFailed: HomeUiState = homeWithPosts.copy(errorMessages = listOf(loadError))
-
     /** The first load failed: no posts, only the snackbar with a retry. */
     val homeLoadFailed: HomeUiState = HomeUiState.NoPosts(
         isLoading = false,

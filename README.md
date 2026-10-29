@@ -61,8 +61,8 @@ looks, the matching test fails.
 | TR-27 | `BreakingNewsAndPremiumScreenshotTest.premiumHistoryCard_light` | `PostCardHistory` + `PremiumBadge` | Paywalled history post        |
 | TR-28 | `ScreensScreenshotTest.homeFeed_initialLoading`               | `HomeFeedScreen`      | First load: full-screen progress indicator    |
 | TR-29 | `ScreensScreenshotTest.homeFeed_refreshing`                   | `HomeFeedScreen`      | Refresh in progress: indicator over the posts |
-| TR-30 | `ScreensScreenshotTest.homeFeed_refreshFailed`                | `HomeFeedScreen`      | Refresh failed: posts stay, error snackbar with Retry |
-| TR-31 | `ScreensScreenshotTest.homeFeed_loadFailed`                   | `HomeFeedScreen`      | First load failed: empty screen, error snackbar |
+| TR-30 | `FeedMessagesScreenshotTest.errorSnackbar_light`              | `Snackbar`            | The feed's error snackbar: message and Retry, brand colors |
+| TR-31 | `ScreensScreenshotTest.homeFeed_loadFailed`                   | `HomeFeedScreen`      | First load failed: empty screen, no "Tap to load content" |
 | TR-32 | `ScreensScreenshotTest.tablet_listDetailWithNavRail`          | `JetnewsAppFrame` + `ListDetailScene` | Tablet: navigation rail, feed pane and article pane |
 
 Severity, epic, feature and story are set **only** in the Allure annotations on each test
@@ -89,9 +89,11 @@ the two on every run and fails if an id, a class or a method name differs.
 - **Data** comes from the app's own hardcoded posts (`data/posts/impl/PostsData.kt`): fixed dates,
   local drawables, no network. Edge cases are copies of real posts with one field changed
   (`ScreenshotFixtures.kt`).
-- **Animated states** (the refresh indicator and the error snackbar, TR-28 to TR-31) are taken
-  1 second after the first frame (`snapshotAfter` in `ScreenshotSetup.kt`), when their enter
-  animations have finished. Paparazzi's clock is fixed, so it is always the same frame.
+- **Animated states.** Paparazzi renders a screen without running its enter animations. The
+  progress indicators (TR-28, TR-29) are visible anyway, but the error snackbar is not: on the
+  full screen it never appears. The first review of these goldens found this, so the snackbar is
+  tested on its own (TR-30, the same `Snackbar` that `JetnewsSnackbarHost` draws, with the
+  app's strings), and TR-31 checks only the screen behind it.
 - **Tablet layout** (TR-32) renders the app's own `JetnewsAppFrame` (navigation rail) and
   `ListDetailScene` with the pane metadata the home and post entries use (`HomeListPaneMetadata`,
   `PostDetailPaneMetadata`), so a change to the rail, the pane width or the split fails the test.
@@ -111,7 +113,7 @@ the two on every run and fails if an id, a class or a method name differs.
   problems such as OEM fonts or GPU rendering bugs.
 - Behavior is not part of a screenshot. The pull-to-refresh gesture, tapping Retry and whether
   the snackbar appears at all are interaction tests; `HomeScreenTests.postsContainError_snackbarShown`
-  in `app/src/androidTest` covers the snackbar on a device. TR-29 to TR-31 cover only how these
+  in `app/src/androidTest` covers the snackbar on a device. TR-28 to TR-31 cover only how these
   states look.
 - The tablet test does not run `NavDisplay`, so a bug in how the back stack is turned into a
   scene (`ListDetailSceneStrategy`) is not caught here. That belongs in a unit or UI test of the
@@ -172,7 +174,7 @@ Goldens are recorded on the CI runner, not on a laptop, so font rendering matche
    - Images are the real post images, not placeholders.
    - No image is blank, and every image belongs to a test that exists.
    - Screens match the reference screenshots of the app (`screenshots/jetnews_all_screens.png`).
-   - Animated states are finished: the refresh indicator and the snackbar are fully visible.
+   - States that are only reached through an animation are really visible (a snapshot of the error state without the snackbar is not a snapshot of the error state).
    - Anything that looks wrong for the product is a ticket in `docs/known-issues.md` (and the tracker) before the golden is approved, and the test description names the ticket.
 4. Bring the approved images into the branch under test, commit, and delete the review branch:
    ```bash
@@ -195,6 +197,13 @@ Goldens are recorded on the CI runner, not on a laptop, so font rendering matche
 | The Premium badge looked identical in light and dark mode. `JetnewsTheme` used dynamic color, and Paparazzi filled it with its default palette, so the goldens showed colors the app never designed. | Test setup issue | Fixed for all goldens: the tests render the brand schemes, and all goldens were re-recorded and reviewed again. |
 | At 200 % font size "Updated 10:45" broke in the middle of the word next to the label (TR-22). | Product defect | Fixed in the app before approval: the label row is a `FlowRow`, so the time moves to its own line in one piece. |
 
+### What the review of the feed-state goldens found
+
+| Finding | Type | Outcome |
+| :--- | :--- | :--- |
+| The goldens for "refresh failed" and "first load failed" showed no error snackbar. The tests passed in record mode, but the error state they claimed to cover was not in the image. Taking the snapshot later or queuing the message before the first frame did not help: Paparazzi does not run the snackbar's enter animation. | Test defect | Fixed before approval: the snackbar is a component test of its own (TR-30), the "refresh failed" screen test was dropped because it was identical to TR-13, and TR-31 checks only the empty screen. |
+| The 24 existing goldens recorded again on CI were byte-identical to the committed ones. | Evidence | The app changes (badges in more cards, extracted layout pieces) did not change any existing screen. |
+
 ## Regression demo
 
 The `demo/visual-regression` branch makes one realistic change to the app: the padding around the thumbnail in `PostCardSimple` (`ui/home/PostCards.kt`) goes from 16 dp to 12 dp. Nothing else changes.
@@ -212,7 +221,7 @@ The `demo/visual-regression` branch makes one realistic change to the app: the p
 | TR-13, TR-14, TR-15 | Home feed screens |
 | TR-23, TR-24 | Premium cards, which are simple cards with a badge |
 
-The other 13 tests do not contain that card and still passed. Rebased on the current suite, the same change is expected to fail the new screens that show simple cards too: TR-29, TR-30 and TR-32.
+The other 13 tests do not contain that card and still passed. Rebased on the current suite, the same change is expected to fail the new screens that show simple cards too: TR-29 and TR-32.
 
 This is the delta image Paparazzi produced for TR-04. Left: the approved golden (16 dp). Right: the new rendering (12 dp). Middle: the difference. The doubled text shows that the content moved.
 
@@ -248,10 +257,11 @@ app/src/main/                               JetNews app plus the banner, badge a
 app/src/test/java/com/example/jetnews/screenshot/
     FeedCardsScreenshotTest.kt              TR-01 to TR-09
     AccessibilityAndLocaleScreenshotTest.kt TR-10 to TR-12
-    ScreensScreenshotTest.kt                TR-13 to TR-18, TR-28 to TR-32
+    ScreensScreenshotTest.kt                TR-13 to TR-18, TR-28, TR-29, TR-31, TR-32
+    FeedMessagesScreenshotTest.kt           TR-30
     BreakingNewsAndPremiumScreenshotTest.kt TR-19 to TR-27
     TestCatalogConsistencyTest.kt           Checks the README table against the tests
-    ScreenshotSetup.kt                      Paparazzi rules, the themed host, delayed snapshots
+    ScreenshotSetup.kt                      Paparazzi rules and the themed host
     ScreenshotFixtures.kt                   Test data built from the app's posts
     AttachSnapshotsOnFailure.kt             Allure attachments for failed snapshots
 app/src/test/allure/categories.json         Allure failure categories
