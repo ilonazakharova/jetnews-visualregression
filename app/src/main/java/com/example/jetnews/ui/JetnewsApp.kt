@@ -97,12 +97,7 @@ fun JetnewsApp(appContainer: AppContainer, isBackEnabled: Boolean, initialBackSt
  * Shared with the screenshot tests, so the tablet snapshot uses the same frame as the app.
  */
 @Composable
-fun JetnewsAppFrame(
-    isExpandedScreen: Boolean,
-    currentTopLevelKey: NavKey,
-    navigate: (NavKey) -> Unit,
-    content: @Composable () -> Unit,
-) {
+fun JetnewsAppFrame(isExpandedScreen: Boolean, currentTopLevelKey: NavKey, navigate: (NavKey) -> Unit, content: @Composable () -> Unit) {
     Row {
         if (isExpandedScreen) {
             AppNavRail(

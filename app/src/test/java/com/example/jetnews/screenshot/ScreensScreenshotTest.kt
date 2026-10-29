@@ -24,6 +24,7 @@ import androidx.compose.runtime.remember
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.runtime.NavKey
 import app.cash.paparazzi.DeviceConfig
+import com.example.jetnews.R
 import com.example.jetnews.data.posts.impl.post1
 import com.example.jetnews.screenshot.ScreenshotFixtures.homeEmpty
 import com.example.jetnews.screenshot.ScreenshotFixtures.homeInitialLoading
@@ -47,6 +48,9 @@ import io.qameta.allure.Severity
 import io.qameta.allure.SeverityLevel
 import io.qameta.allure.Story
 import io.qameta.allure.junit4.DisplayName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.junit.Rule
 import org.junit.Test
 
@@ -170,8 +174,11 @@ class ScreensScreenshotTest {
             "'Can't update latest news' with a Retry action.",
     )
     fun homeFeed_refreshFailed() {
+        val snackbarHostState = errorSnackbarAlreadyQueued()
         paparazzi.snapshotAfter(ENTER_ANIMATIONS_DONE_MILLIS) {
-            BrandTheme(darkTheme = false) { HomeFeed(uiState = homeRefreshFailed, showTopAppBar = true) }
+            BrandTheme(darkTheme = false) {
+                HomeFeed(uiState = homeRefreshFailed, showTopAppBar = true, snackbarHostState = snackbarHostState)
+            }
         }
     }
 
@@ -181,9 +188,36 @@ class ScreensScreenshotTest {
     @Severity(SeverityLevel.CRITICAL)
     @Description("The first load failed: no posts, an empty screen and the snackbar with a Retry action.")
     fun homeFeed_loadFailed() {
+        val snackbarHostState = errorSnackbarAlreadyQueued()
         paparazzi.snapshotAfter(ENTER_ANIMATIONS_DONE_MILLIS) {
-            BrandTheme(darkTheme = false) { HomeFeed(uiState = homeLoadFailed, showTopAppBar = true) }
+            BrandTheme(darkTheme = false) {
+                HomeFeed(uiState = homeLoadFailed, showTopAppBar = true, snackbarHostState = snackbarHostState)
+            }
         }
+    }
+
+    /**
+     * The app shows the error snackbar in two steps: an effect reads the error from the UI state
+     * and calls `showSnackbar`, and only on the next frame does the snackbar start its enter
+     * animation. Paparazzi renders too few frames for both steps, so the snapshot showed no
+     * snackbar at all. Queuing the same message (the app's own strings) before the first frame
+     * lets the enter animation start at once. The screen's own effect still runs and waits
+     * behind it. Whether the app shows the snackbar at all is checked on a device by
+     * HomeScreenTests.postsContainError_snackbarShown.
+     */
+    private fun errorSnackbarAlreadyQueued(): SnackbarHostState {
+        val state = SnackbarHostState()
+        val resources = paparazzi.context.resources
+        // Unconfined runs showSnackbar up to its first suspension right here, so the snackbar
+        // is current before the first frame. The coroutine never finishes; that is fine for a
+        // single snapshot.
+        CoroutineScope(Dispatchers.Unconfined).launch {
+            state.showSnackbar(
+                message = resources.getString(R.string.load_error),
+                actionLabel = resources.getString(R.string.retry),
+            )
+        }
+        return state
     }
 
     @Test
@@ -230,7 +264,11 @@ class ScreensScreenshotTest {
     }
 
     @Composable
-    private fun HomeFeed(uiState: HomeUiState, showTopAppBar: Boolean) {
+    private fun HomeFeed(
+        uiState: HomeUiState,
+        showTopAppBar: Boolean,
+        snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
+    ) {
         HomeFeedScreen(
             uiState = uiState,
             showTopAppBar = showTopAppBar,
@@ -240,7 +278,7 @@ class ScreensScreenshotTest {
             onErrorDismiss = {},
             openDrawer = {},
             homeListLazyListState = rememberLazyListState(),
-            snackbarHostState = remember { SnackbarHostState() },
+            snackbarHostState = snackbarHostState,
             onSearchInputChanged = {},
         )
     }
