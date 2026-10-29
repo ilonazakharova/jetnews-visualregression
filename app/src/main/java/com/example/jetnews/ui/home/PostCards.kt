@@ -107,7 +107,7 @@ fun PostCardSimple(post: Post, navigateToPost: (String) -> Unit, isFavorite: Boo
                 )
             },
     ) {
-        PostImage(post, Modifier.padding(16.dp))
+        PostImage(post, Modifier.padding(12.dp))
         Column(
             modifier = Modifier
                 .weight(1f)
